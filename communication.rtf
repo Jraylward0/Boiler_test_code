@@ -1,0 +1,328 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1347\cocoasubrtf570
+{\fonttbl\f0\fmodern\fcharset0 Courier;\f1\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;}
+\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+/* Communication Channel Declarations ------------------------*/\
+chan valve = [1] of \{ int \}; /* Messages to the Valve */\
+chan pumps = [10] of \{ int, int \};\
+chan boiler = [1] of \{ int, int, int\};\
+/* Message Identifiers -------------------------------------- */\
+/* Messages between the physunits-Proctype and the \'93real\'94 */\
+/* Components of the Physical Units Segment, that is Pumps, */\
+/* Valve, Boiler, ... */\
+#define valve_activate 100\
+#define pumps_open 200\
+#define pumps_close 201\
+#define pumps_ack 202\
+#define pumps_terminate 203\
+#define pumps_getstate 204\
+#define pumps_flow 205\
+#define pumps_askpumpswitches 206\
+#define pumps_switchstates 207\
+#define pumps_askpumpctrlsenses 208\
+#define pumps_pumpctrlsenses 209\
+#define boiler_cycle 500\
+#define boiler_status 501\
+#define boiler_terminate 502\
+/* Global Variables for the Physical Units -------------------- */\
+/* (these are not to be used by the Control Program) ---------- */\
+/* Variables to mark defective Units */\
+int levelmeterstate;\
+int steammeterstate;\
+int pumpctrl_state[5];\
+int pump_switch[5];\
+int pumpctrl_sense[5];\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+int pflow; 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+/* ----------------- PHYSICAL UNIT SECTION -------------------- */\
+proctype Pumps()\
+\{\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+int pumpid; 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+ atomic\
+ \{\
+ pumpctrl_state[1]=OK; pumpctrl_state[2]=OK;\
+ pumpctrl_state[3]=OK; pumpctrl_state[4]=OK;\
+ pump_switch[1]=OFF; pump_switch[2]=OFF;\
+ pump_switch[3]=OFF; pump_switch[4]=OFF;\
+ pumpctrl_sense[1]=OFF; pumpctrl_sense[2]=OFF;\
+ pumpctrl_sense[3]=OFF; pumpctrl_sense[4]=OFF;\
+ \};\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+end: do 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+ :: pumps?pumps_open(pumpid)\
+    -> if\
+:: pump_switch[pumpid]==OFF ->\
+   atomic\
+  \{\
+   pump_switch[pumpid]=ON ->\
+pflow=pflow+P ->\
+#ifdef MESSAGES\
+printf(\'93Pump %d ON.\\n\'94,pumpid) ->\
+#endif\
+        if\
+        :: (pumpctrl_state[pumpid]==OK) ->\
+          pumpctrl_sense[pumpid]=ON\
+        :: (pumpctrl_state[pumpid]!=OK) ->\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+skip fi 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+       \}\
+    :: else -> skip\
+    fi -> pumps!pumps_ack(pumpid)\
+ :: pumps?pumps_close(pumpid)\
+    -> if\
+       :: pump_switch[pumpid]==ON ->\
+          atomic\
+          \{\
+           pump_switch[pumpid]=OFF ->\
+          pflow=pflow-P ->\
+#ifdef MESSAGES\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+#endif 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+printf(\'93Pump %d OFF.\\n\'94,pumpid) ->\
+  if\
+   :: (pumpctrl_state[pumpid]==OK) ->\
+      pumpctrl_sense[pumpid]=OFF\
+   :: (pumpctrl_state[pumpid]!=OK) ->\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+skip fi 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+   \}\
+:: else -> skip\
+    fi -> pumps!pumps_ack(pumpid)\
+ :: pumps?pumps_terminate(0) -> goto End_Pumps\
+od;\
+End_Pumps:\
+skip;\
+#ifdef MESSAGES\
+printf(\'93Pump process terminated.\\n\'94);\
+#endif\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+\} 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+/* The Boiler has no communication Channels except the Timer /*\
+/* Channel, which is used to keep it in Sync with the Control */\
+/* Program, whose Cycle Time is 5 Seconds */\
+proctype Boiler()\
+\{\
+ int q,v,pf,heating;\
+do\
+ :: boiler?boiler_cycle(pf,heating) ->\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+atomic \{ 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+    q=q-(5*v)+(5*pf) -> /* in:p, out:v */\
+#ifdef MESSAGES\
+printf(\'93Boiler holds %d Liters of Water and produces %d Liters of Steam/\
+sec.\\n\'94,q,v) ->\
+#endif\
+    if\
+    :: (heating==ON) -> v = (q/100) /* v is integer... */\
+     :: (heating==OFF) -> v = 0\
+    fi\
+     \}\
+    -> boiler!boiler_status(q,v)\
+ :: boiler?boiler_terminate(0,0) -> goto End_Boiler;\
+ :: valve?valve_activate -> q=0; v=0\
+ od;\
+End_Boiler:\
+skip;\
+#ifdef MESSAGES\
+printf(\'93Boiler Process terminated.\\n\'94);\
+#endif\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+\} 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+/* The \'93Physical Units\'94 have to be seen as a logical Group of */\
+/* all physical Units in the Steam Boiler. They are connected */\
+/* via a communication Networkto the Control Program. The */\
+/* Control Program can only communicate with the */\
+/* Physical_Units() Proctype, which coordinates all Units */\
+proctype Physical_Units()\
+\{\
+ int nr;\
+ int ctrlpmode;\
+ int rec_program_ready = 0;\
+ int rec_level_failure_detection = 0;\
+ int rec_steam_failure_detection = 0;\
+ int rec_pump_repaired_acknowledgment = 0;\
+ int rec_pump_control_repaired_acknowledgment = 0;\
+ int rec_level_repaired_acknowledgment = 0;\
+ int rec_steam_repaired_acknowledgment = 0;\
+ int blevel,bsteam;\
+ chan rec_pump_failures = [4] of \{ int \};\
+ chan rec_pump_control_failures = [4] of \{ int \};\
+ /* Start up all Physical Units */\
+ atomic\
+ \{\
+ run Pumps();\
+run Boiler();\
+ \}\
+ /* Now notify the Control Program that we are ready to go... */\
+ ext_ctrlp!ctrlp_steam_boiler_waiting(0);\
+ ext_physunits?physunits_mode(ctrlpmode) ->\
+physunits_main:\
+ do\
+ :: if\
+ :: (ctrlpmode==mode_init) ->\
+     boiler!boiler_cycle(pflow,OFF) /* No heating in Init Mode */\
+     :: (ctrlpmode!=mode_init) ->\
+ boiler!boiler_cycle(pflow,ON)\
+ fi ->\
+ boiler?boiler_status(blevel,bsteam) ->\
+ /* A Mode Message must always be answered with Messages that */\
+ /* must be present during each transmission: */\
+ atomic\
+ \{\
+     ext_ctrlp_pumpstate!pump_switch[1],pump_switch[2],\
+     pump_switch[3],pump_switch[4] ->\
+     ext_ctrlp_pumpctrlstate!pumpctrl_sense[1],pumpctrl_sense[2],\
+     pumpctrl_sense[3],pumpctrl_sense[4] ->\
+    ext_ctrlp!ctrlp_level(blevel) ->\
+    ext_ctrlp!ctrlp_steam(bsteam)\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+\} -> if 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+    :: (ctrlpmode==mode_emergency) -> goto End_Physunits\
+     :: else -> skip\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+fi; 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+    /* Afterwards we transmit optional Messages: */\
+ do\
+     :: (rec_program_ready==1)\
+       -> ext_ctrlp!ctrlp_physical_units_ready(0)\
+       -> rec_program_ready=0\
+     :: (len(rec_pump_failures)!=0)\
+       -> rec_pump_failures?nr\
+        -> ext_ctrlp!ctrlp_pump_failure_acknowledgment(nr)\
+     :: (len(rec_pump_control_failures)!=0)\
+       -> rec_pump_control_failures?nr\
+       -> ext_ctrlp!ctrlp_pump_control_failure_acknowledgment(nr)\
+     :: (rec_level_failure_detection!=0)\
+       -> ext_ctrlp!ctrlp_level_failure_acknowledgment(0)\
+       -> rec_level_failure_detection=0\
+     :: (rec_steam_failure_detection!=0) ->\
+       ext_ctrlp!ctrlp_steam_outcome_failure_acknowledgment(0) ->\
+       rec_steam_failure_detection=0\
+     :: else -> break\
+\pard\pardeftab720\sa240
+\cf0 \expnd0\expndtw0\kerning0
+od; 
+\f1\fs24 \expnd0\expndtw0\kerning0
+\
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+/* And finally we mark the End of our Transmission */\
+    ext_ctrlp!ctrlp_end_of_transmission(0);\
+ do\
+     /* All following are answered in the _next_ Cycle... */\
+ :: ext_physunits?physunits_program_ready(0)\
+    -> rec_program_ready=1;\
+ :: ext_physunits?physunits_open_pump(nr) -> pumps!pumps_open(nr)\
+    -> pumps?pumps_ack(nr)\
+ :: ext_physunits?physunits_close_pump(nr) -> pumps!pumps_close(nr)\
+    -> pumps?pumps_ack(nr)\
+ :: ext_physunits?physunits_valve(0) -> valve!valve_activate\
+ :: ext_physunits?physunits_pump_failure_detection(nr)\
+    -> rec_pump_failures!nr\
+ :: ext_physunits?physunits_pump_control_failure_detection(nr)\
+     -> rec_pump_control_failures!nr\
+ :: ext_physunits?physunits_level_failure_detection(0)\
+    -> rec_level_failure_detection=1\
+ :: ext_physunits?physunits_steam_failure_detection(0)\
+     -> rec_steam_failure_detection=1\
+ :: ext_physunits?physunits_pump_repaired_acknowledgment(nr)\
+    -> rec_pump_repaired_acknowledgment=1\
+:: ext_physunits?physunits_pump_control_repaired_acknowledgment(nr)\
+    -> rec_pump_control_repaired_acknowledgment=nr\
+ :: ext_physunits?physunits_level_repaired_acknowledgment(0)\
+     -> rec_level_repaired_acknowledgment=1\
+ :: ext_physunits?physunits_steam_repaired_acknowledgment(0)\
+    -> rec_steam_repaired_acknowledgment=1\
+ :: ext_physunits?physunits_mode(ctrlpmode) -> goto physunits_main\
+od;\
+od;\
+End_Physunits:\
+#ifdef MESSAGES\
+printf(\'93Physunits received Emergency Stop Message.\\n\'94);\
+#endif\
+/* Once the Program has reached Emergency Stop MOde, the physical */\
+/* Environment is then responsible to take appropriate actions: */\
+valve!valve_activate ->\
+pumps!pumps_close(1) -> pumps?pumps_ack(1) ->\
+pumps!pumps_close(2) -> pumps?pumps_ack(2) ->\
+pumps!pumps_close(3) -> pumps?pumps_ack(3) ->\
+pumps!pumps_close(4) -> pumps?pumps_ack(4) ->\
+pumps!pumps_terminate(0) ->\
+boiler!boiler_terminate(0,0) ->\
+#ifdef MESSAGES\
+printf(\'93Physunits stopped. (Emergency Stop).\\n\'94);\
+#endif\
+\}\
+}

@@ -1,0 +1,480 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1347\cocoasubrtf570
+{\fonttbl\f0\fmodern\fcharset0 Courier;}
+{\colortbl;\red255\green255\blue255;}
+\margl1440\margr1440\vieww16900\viewh8660\viewkind0
+\deftab720
+\pard\pardeftab720
+
+\f0\fs26 \cf0 \expnd0\expndtw0\kerning0
+proctype Control_Program() \{\
+	int pumpSwitch[5];				//pump switch states received from physical units\
+	int expectedPumpSwitch[5];		//expected pump switch states (next cycle)\
+	int pumpState[5];				//stored pump states (defect, okay)\
+	int pumpControlState[5];		//pump control states received from physical units\
+	int expectedPumpControlState[5];	//expected pump control states (next cycle)\
+	int level, lastLevel;			//level\
+	int steam, lastSteam;			//steam\
+	int stopCounter = 0;\
+	int rec_stop = 0;\
+	int rec_physicalUnits_ready = 0;\
+	int nr, state;\
+	int waterLevelUnit = OK;\
+	int steamLevelUnit = OK;\
+	int waitPumpACK[5];\
+	int waitPumpControlACK[5];\
+	int waitSteamACK;\
+	int waitLevelACK;\
+	int waitPhysicalUnitsReady;\
+	int mode = mode_init;\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* Following channels are used within the Control Program to store pump states */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	chan unusedPump = [2] of \{int\};\
+	chan usedPump = [2] of \{int\};\
+	chan defectPump = [2] of \{int\};\
+	chan defectPumpController = [2] of \{int\};\
+	chan pumpControlState_first = [2] of \{int\};\
+	chan pumpControlState_second = [2] of \{int\};\
+	expectedPumpSwitch[1] = OFF; expectedPumpSwitch[2] = OFF; expectedPumpSwitch[3] = OFF; expectedPumpSwitch[4] = OFF;\
+	expectedPumpControlState[1] = OFF; expectedPumpControlState[2] = OFF; expectedPumpControlState[3] = OFF; expectedPumpControlState[4] = OFF;\
+	#ifdef MESSAGES\
+	printf(\'93MSG: Control_Program waiting for steam boiler to initialize.\\n);\
+	#endif\
+	ext_ctrlp?ctrlp_steam_boiler_waiting(0);\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* Wait for physical units (indicate pump being ready)                         */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	#ifdef MESSAGES\
+	printf(\'93Signal received (ready signal) from Steam Boiler.\\n\'94);\
+	#endif\
+	//Initialize, all Pumps = OK\
+	pumpState[1] = OK; pumpState[2] = OK; pumpState[3] = OK; pumpState[4] = OK;\
+	//Pumps available to use\
+	unusedPump!1;\
+	unusedPump!2;\
+	Main_Loop:\
+		do\
+		:: ext_physunits!physunits_mode(mode) ->\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* Control Program reception of messages coming from the physical units, all   */\
+/* messages should be received/emitted simultaneously                          */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	lastLevel = level ->\
+	lastSteam = steam ->\
+	atomic \{\
+		ext_ctrlp_pumpState?pumpSwitch[1], pumpSwitch[2], pumpSwitch[3], pumpSwitch[4] ->\
+		ext_ctrlp_pumpControlState?pumpControlState[1], pumpControlState[2], pumpControlState[3], pumpControlState[4] ->\
+		ext_ctrlp?ctrlp_level(level) ->\
+		ext_ctrlp?ctrlp_steam(steam) ->\
+	\} ->\
+	#ifdef MESSAGES\
+	printf(\'93Mode %d. Boiler: Level %d, Steam %d. Pumps: %d %d %d %d Controllers: %d %d %d %d\\n\'94, mode, level, steam, pumpSwitch[1], pumpSwitch[2], pumpSwitch[3], pumpSwitch[4], pumpControlState[1], pumpControlState[2], pumpControlState[3], pumpControlState[4]) ->\
+	#endif\
+	do\
+	::	ext_ctrlp?ctrlp_stop(0) -> rec_stop = 1\
+	::	ext_ctrlp?ctrlp_pump_repaired(nr) ->\
+			if\
+			:: (nr == 1) ->	if\
+							::	(pumpState[1] == DEFECT) ->\
+								defectPump??1 -> pumpState[1] = OK ->\
+								unusedPump!1\
+							::	else -> goto Failure\
+							fi\
+			:: (nr == 2) ->	if\
+							::	(pumpState[2] == DEFECT) ->\
+								defectPump??2 -> pumpState[2] = OK ->\
+								unusedPump!2\
+							::	else -> goto Failure\
+							fi\
+			fi\
+			:: ext_ctrlp?ctrlp_pump_control_repaired(nr) ->\
+				if\
+				:: (nr == 1) -> defectPumpController??1\
+				:: (nr == 2) -> defectPumpController??2\
+				fi\
+			:: ext_ctrlp?ctrlp_level_repaired(0) ->\
+				if\
+				:: (waterLevelUnit! = OK) -> waterLevelUnit = OK\
+				:: else -> goto Failure\
+				fi\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* Failure MSG:                                                                */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+			:: ext_ctrl?ctrlp_pump_failure_acknowledgment(nr) -> \
+				if\
+				:: (waitPumpACK[nr] != ON) -> goto Failure\
+				:: else -> waitPumpACK[nr] = OFF\
+				fi\
+			:: ext_ctrlp?ctrlp_pump_control_failure_acknowledgment(nr) ->\
+				if\
+				:: (waitPumpControlACK[nr] != ON) -> goto Failure\
+				:: else -> waitPumpControlACK[nr] = OFF\
+				fi\
+			:: ext_ctrl?ctrlp_level_failure_acknowledgment(0) ->\
+				if\
+				:: (waitLevelACK != ON) -> goto Failure\
+				:: else -> waitLevelACK = OFF\
+				fi\
+			::ext_ctrlp?ctrlp_steam_outcome_failure_acknowledgment(0) ->\
+				if\
+				:: (waitSteamACK != ON) -> goto Failure\
+				:: else -> waitSteamACK = OFF\
+				fi\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* Control program analysis of received information, transmission of info to   */\
+/* physical units\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	atomic \{\
+		if\
+		:: (rec_stop == 1) rec_stop = 0 -> stopCounter++ ->\
+			if\
+			:: (stopCounter == 3) -> goto Emergency_Stop_Mode\
+			:: else -> skip\
+			fi\
+		:: else -> skip\
+		fi\
+\} ->\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* 1.) check the pumps                                                         */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	if \
+	:: (pumpSwitch[1] != expectedPumpSwitch[1]) ->\
+		if\
+		:: usedPump??1\
+		:: unusedPumps??1\
+		:: defectPumps??1\
+		fi\
+	->	atomic \{\
+			defectPumps!1\
+			-> pumpState[1] = DEFECT -> waitPumpACK[1] = ON\
+			-> expectedPumpSwitch[1] = pumpSwitch[1]\
+			-> expectedPumpControlState[1] = pumpControlState[1]\
+		#ifdef MESSAGES\
+		-> printf(\'93DEFECT: Pump1 state failure.\\n\'94)\
+		#endif\
+		\}\
+	:: else -> skip\
+	fi ->\
+	if\
+	:: (pumpSwitch[2] != expectedPumpSwitch[2] ->\
+		if\
+		:: usedPump??2\
+		:: unusedPumps??2\
+		:: defectPumps??2\
+		fi\
+	->	atomic \{\
+			defectPumps!2\
+			-> pumpState[2] = DEFECT -> waitPumpACK[2] = ON\
+			-> expectedPumpSwitch[2] = pumpSwitch[2]\
+			-> expectedPumpControlState[2] = pumpControlState[2]\
+		#ifdef MESSAGES\
+		-> printf(\'93DEFECT: Pump2 state failure.\\n\'94)\
+		#endif\
+		\}\
+	:: else -> skip\
+	fi ->\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* 2.) check pump controllers                                                  */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	if\
+	::	(pumpControlState[1] != expectedPumpControlState[1]) ->\
+		defectPumpController!1\
+		->	atomic \{\
+				waitPumpControlACK[1] = ON ->\
+			#ifdef MESSAGES\
+			printf(\'93DEFECT: pump controller 1 state failure.\\n\'94, nr) ->\
+			#endif\
+				expectedPumpControlState[1] = pumpControlState[1]\
+			\}\
+	:: else -> skip\
+	fi ->\
+	if\
+	::	(pumpControlState[2] != expectedPumpControlState[2]) ->\
+		defectPumpController!2\
+		->	atomic \{\
+				waitPumpControlACK[2] = ON ->\
+			#ifdef MESSAGES\
+			printf(\'93DEFECT: pump controller 2 state failure.\\n, nr) ->\
+			#endif\
+				expectedPumpControlState[2] = pumpControlState[2]\
+			\}\
+	:: else -> skip\
+	fi ->\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* 3.) check if controllers still work after a start/stop                      */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	do\
+	:: (len(pumpControlState_sencond) != 0) -> pumpControlState_second?nr(state) ->\
+		if\
+		:: pumpSwitch[nr] != state ->\
+			if\
+			:: pumpState[nr] == DEFECT -> skip\
+			:: pumpState[nr] == OK ->\
+				defectPumpController!nr ->\
+				waitPumpControlACK[nr] = ON ->\
+	#ifdef MESSAGES\
+	printf(\'93DEFECT: pump controller %d re-start/stop error.\\n, nr);\
+	#endif\
+			fi\
+			:: else -> skip\
+			fi\
+		:: else -> break;\
+	od;\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* Move data from pumpControlState_first to pumpControlState_second            */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	atomic \{\
+		do\
+		:: (len(pumpControlState_first) != 0) -> pumpControlState_first?nr(state) -> pumpControlState_second!nr(state)\
+		:: else -> break\
+		od\
+	\};\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* 4.) check water levels                                                      */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	atomic \{\
+		if\
+		::	(	(mode != mode_init) &&\
+				(	(level > C) ||\
+					(level < 0) ||\
+				(	(level - lastLevel) > (5 * 4 * P) ||\
+					(lastLevel - level) > (5 * 4 * P + W))))\
+			-> waterLevelUnit = DEFECT\
+			-> waitLevelACK = ON\
+	#ifdef MESSAGES\
+	-> printf(\'93DEFECT: water level measuring unit, last = %d, now = %d.\\n\'94, lastLevel, level)\
+	#endif\
+		:: else -> skip\
+		fi\
+	\};\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* 5.) check steam levels                                                      */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	atomic \{\
+		if\
+		::	(	(steam > W) ||\
+				(steam < 0) ||\
+				(	(steam - lastSteam) > 2 * 5) ||\
+				(	(lastSteam - steam) > 2 * 5))\
+			-> steamLevelUnit = DEFECT\
+			-> waitSteamACK = ON\
+		:: else -> skip\
+		fi\
+	\};\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* MSG Failure (modes)                                                         */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	if\
+	:: ((mode == mode_failed) || (mode == mode_degrading)) ->\
+		if\
+		:: (waitLevelACK == ON)\
+			-> ext_physunits!physunits_level_failure_detection(0)\
+		:: else -> skip\
+		fi;\
+		if\
+		:: (waitSteamACK == ON)\
+			-> ext_physunits!physunits_steam_failure_detectrion(0)\
+		:: else -> skip\
+		fi;\
+		if\
+		:: (waitPumpACK[1] == ON)\
+			-> ext_physunits!physunits_pump_failure_detection(1)\
+		:: else -> skip\
+		fi;\
+		if\
+		:: (waitPumpACK[2] == ON)\
+			-> ext_physunits!physunits_pump_failure_detection(2)\
+		:: else -> skip\
+		fi;\
+		if\
+		:: (waitPumpControlACK[1] == ON)\
+			-> ext_physunits!physunits_pump_control_failure_detection(1)\
+		:: else -> skip\
+		fi;\
+		if\
+		:: (waitPumpControlACK[2] == ON)\
+			-> ext_physunits!physunits_pump_control_failure_detection(2)\
+		:: else -> skip\
+		fi;\
+	:: else -> skip\
+	fi;\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* water level actions                                                         */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	if\
+	::	(	(mode == mode_normal) ||\
+			(mode == mode_degrading) ||\
+			(mode == mode_failed))\
+		-> 	if\
+			:: ((level > N2) && (len(usedPump) != 0)) -> usedPump?nr\
+				-> ext_physunits!physunits_close_pump(nr)\
+	#ifdef MESSAGES\
+	-> printf(\'93CLOSE pump %d.\\n\'94, nr)\
+	#endif\
+				-> unusedPump!nr\
+				-> expectedPumpSwitch[nr] = OFF -> expectedPumpControlState[nr] = OFF\
+				:: ((level < N1) && (len(unusedPump) != 0)) -> unusedPump?nr\
+					-> usedPump!nr\
+					-> ext_physunits!physunits_open_pump(nr)\
+	#ifdef MESSAGES\
+	-> printf(\'93OPEN pump %d.\\n\'94, nr)\
+	#endif\
+					-> expectedPumpSwitch[nr] = ON -> expectedPumpControlState[nr] = ON\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* prevent water from reaching above limit                                     */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+						:: (level >= M2 - 20 * P) -> goto Emergency_Stop_Mode\
+						:: (level >= M1 + 20 * P) -> goto Emergency_Stop_Mode\
+						:: (		(level < M2 - 20 * P) &&\
+								(level > M1 + 20 * P) &&\
+								(	(level <= N2) || (len(usedPump) == 0)) &&\
+								(	(level >= N1) || (len(usedPump) == 0)) -> skip\
+						fi\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* initialize (pump_on open_valve)                                             */\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+						:: (mode == mode_init)\
+							->	if\
+								:: ((level < N1) && (len(unusedPump) != 0)) -> unusedPump?nr\
+									-> usedPump!nr\
+									-> ext_physunits!physunits_open_pump(nr)\
+	#ifdef MESSAGES\
+	-> printf(\'93OPEN valve to pump %d.\\n\'94, nr)\
+	#endif\
+									-> expectedPumpSwitch[nr] = ON -> expectedPumpControlState[nr] = ON\
+								:: ((level > N2)) -> ext_physunits!physunits_valve(0)\
+	#ifdef MESSAGES\
+	-> printf(\'93OPEN VALVE.\\n\'94)\
+	#endif\
+								:: (	(level >= N1) &&\
+									(level <= N2)) ->\
+									if\
+									:: 	(rec_physunits_ready!=1) ->\
+										ext_physunits!physunits_program_ready(0) ->\
+										waitphysunitsready=1\
+									:: 	(rec_physunits_ready==1) -> skip\
+									fi\
+								:: else -> skip\
+								fi\
+						fi;\
+\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+/* operating mode*/\
+/* \'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97\'97- */\
+\
+	atomic \{\
+		if\
+		:: (mode == mode_normal)\
+			->	if\
+				::	(waterLevelUnit == DEFECT) -> mode = mode_degrading\
+				::	(	(waterLevelUnit == OK) &&\
+					(	(steamLevelUnit == DEFECT) ||\
+					(len(defectPumpController) != 0) ||\
+					(len(defectPump) != 0))) -> mode = mode_failed\
+				::	(	(waterLevelUnit != DEFECT) &&\
+					(	(steamLevelUnit != DEFECT) &&\
+					(len(defectPumpController) == 0) &&\
+					(len(defectPump) == 0))) -> skip\
+				fi\
+		:: (mode == mode_init)\
+			->	if\
+				::	(	(level >= N1) && (level <= N2) && (rec_physunits_ready == 1)) ->\
+					rec_physunits_ready = 0 ->\
+					if\
+					::	(	(len(defectPump) == 0) &&\
+						(	(len(defectPumpController) == 0) &&\
+							(steamLevelUnit == OK) &&\
+							(waterLevelUnit == OK)) -> mode = mode_normal\
+					:: else -> mode = mode_failed\
+					fi\
+				:: else -> skip\
+				fi\
+		:: (mode == mode_degrading)\
+			->	if\
+				::	(	(waterLevelUnit == OK) &&\
+					(	(steamLevelUnit == DEFECT) ||\
+					(len(defectPumpController) != 0) ||\
+					(len(defectPump) != 0))) -> mode = mode_failed\
+				::	(	(waterLevelUnit == OK) &&\
+						(steamLevelUnit != DEFECT) &&\
+					(len(defectPumpController) == 0) &&\
+					(len(defectPump) == 0)) -> mode = mode_normal\
+				:: else -> skip\
+				fi\
+		:: (mode == mode_failed)\
+			->	if\
+				::	(waterLevelUnit != OK) -> mode = mode_degrading\
+				::	(	(waterLevelUnit == OK) &&\
+					(steamLevelUnit == OK) &&\
+					(len(defectPump) == 0) &&\
+					(len(defectPumpController) == 0)) -> mode = mode_normal\
+				:: else -> skip\
+				fi\
+		fi\
+	\}; od;\
+\
+	Failure:\
+		skip;\
+	#ifdef MESSAGES\
+	printf(\'93transmission failure.\\n\'94);\
+	printf(\'93stopping boiler system.\\n\'94);\
+	#endif\
+	Emergency_Stop_Mode:\
+	ext_physunits!physunits_mode(mode_emergency);\
+	#ifdef MESSAGES\
+	printf(\'93Emergency stop.\\n\'94);\
+	#endif\
+	end:\
+	skip;\
+	#ifdef MESSAGES\
+	printf(\'93END.\\n\'94);\
+	#endif\
+	\}\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+}
